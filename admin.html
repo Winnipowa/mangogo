@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Admin — ChatLibre</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #0f1117; color: #fff; padding: 24px; }
+  h1 { font-size: 18px; margin-bottom: 6px; }
+  p { color: rgba(255,255,255,0.4); font-size: 12px; margin-bottom: 20px; }
+  #login { max-width: 320px; }
+  input { width: 100%; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12); border-radius: 9px; padding: 10px 12px; color: #fff; font-size: 13px; outline: none; margin-bottom: 10px; font-family: inherit; }
+  button { background: #6366f1; border: none; border-radius: 9px; padding: 10px 20px; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
+  button:hover { background: #5254cc; }
+  button.danger { background: #dc2626; }
+  button.muted { background: rgba(255,255,255,0.1); }
+  #reports { display: none; }
+  .report-card { background: #16181d; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; }
+  .report-meta { font-size: 11px; color: rgba(255,255,255,0.3); margin-bottom: 6px; }
+  .report-content { font-size: 13px; color: rgba(255,255,255,0.8); margin-bottom: 10px; background: rgba(255,255,255,0.04); padding: 8px 10px; border-radius: 7px; }
+  .report-actions { display: flex; gap: 8px; }
+  #empty-msg { color: rgba(255,255,255,0.25); font-size: 13px; text-align: center; padding: 40px; }
+</style>
+</head>
+<body>
+
+<h1>🛡️ Admin — ChatLibre</h1>
+<p>Gestion des signalements</p>
+
+<div id="login">
+  <input type="password" id="secret-input" placeholder="Mot de passe admin" />
+  <button onclick="loadReports()">Connexion</button>
+</div>
+
+<div id="reports">
+  <h2 style="font-size:15px; margin-bottom:14px; color:rgba(255,255,255,0.7);">Signalements en attente</h2>
+  <div id="reports-list"></div>
+</div>
+
+<script>
+let secret = ''
+
+async function loadReports() {
+  secret = document.getElementById('secret-input').value
+  const res = await fetch('/api/admin/reports', { headers: { 'x-secret': secret } })
+  if (!res.ok) { alert('Mot de passe incorrect'); return }
+
+  const data = await res.json()
+  document.getElementById('login').style.display = 'none'
+  document.getElementById('reports').style.display = 'block'
+
+  const list = document.getElementById('reports-list')
+  if (data.length === 0) {
+    list.innerHTML = '<div id="empty-msg">✅ Aucun signalement en attente</div>'
+    return
+  }
+
+  list.innerHTML = ''
+  data.forEach(r => {
+    const card = document.createElement('div')
+    card.className = 'report-card'
+    card.id = 'r-' + r.id
+    card.innerHTML = `
+      <div class="report-meta">
+        Salon : <b>${r.room}</b> · Auteur : <b>${r.pseudo}</b> · ${r.created_at}
+      </div>
+      <div class="report-content">${r.content}</div>
+      <div class="report-actions">
+        <button class="danger" onclick="banUser('${r.fingerprint}', ${r.id})">🚫 Bannir</button>
+        <button class="muted" onclick="dismiss(${r.id})">Ignorer</button>
+      </div>
+    `
+    list.appendChild(card)
+  })
+}
+
+async function banUser(fingerprint, reportId) {
+  if (!confirm('Bannir cet utilisateur ?')) return
+  const reason = prompt('Raison du ban :') || 'Comportement inapproprié'
+  await fetch('/api/admin/ban', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-secret': secret },
+    body: JSON.stringify({ fingerprint, ipHash: '', reason })
+  })
+  document.getElementById('r-' + reportId)?.remove()
+  if (!document.querySelector('.report-card')) {
+    document.getElementById('reports-list').innerHTML = '<div id="empty-msg">✅ Aucun signalement en attente</div>'
+  }
+}
+
+async function dismiss(id) {
+  await fetch('/api/admin/dismiss', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-secret': secret },
+    body: JSON.stringify({ id })
+  })
+  document.getElementById('r-' + id)?.remove()
+  if (!document.querySelector('.report-card')) {
+    document.getElementById('reports-list').innerHTML = '<div id="empty-msg">✅ Aucun signalement en attente</div>'
+  }
+}
+</script>
+</body>
+</html>

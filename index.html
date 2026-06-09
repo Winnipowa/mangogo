@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ChatLibre</title>
+<script src="/socket.io/socket.io.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@fingerprintjs/fingerprintjs@3/dist/fp.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+  /* ── LAYOUT ── */
+  #app { display: flex; height: 100vh; background: #0f1117; color: #fff; overflow: hidden; }
+
+  /* ── SIDEBAR ── */
+  #sidebar {
+    width: 240px; flex-shrink: 0; display: flex; flex-direction: column;
+    background: #16181d; border-right: 1px solid rgba(255,255,255,0.07);
+  }
+  #sidebar-header { padding: 18px 16px 14px; border-bottom: 1px solid rgba(255,255,255,0.07); }
+  #sidebar-header h1 { font-size: 15px; font-weight: 700; color: #fff; }
+  #sidebar-header p { font-size: 10px; color: rgba(255,255,255,0.25); margin-top: 2px; }
+  #rooms-label { font-size: 9px; text-transform: uppercase; letter-spacing: .12em; color: rgba(255,255,255,0.22); padding: 12px 16px 6px; }
+  #rooms-list { flex: 1; overflow-y: auto; padding: 2px 8px; }
+  .room-btn {
+    width: 100%; display: flex; align-items: center; gap: 9px;
+    padding: 9px 10px; border: none; background: none; cursor: pointer;
+    border-radius: 10px; color: rgba(255,255,255,0.45); transition: all .12s;
+    text-align: left;
+  }
+  .room-btn:hover { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.75); }
+  .room-btn.active { background: rgba(255,255,255,0.09); color: #fff; }
+  .room-dot { width: 3px; height: 22px; border-radius: 2px; flex-shrink: 0; opacity: 0; transition: opacity .12s; }
+  .room-btn.active .room-dot { opacity: 1; }
+  .room-emoji { font-size: 18px; flex-shrink: 0; }
+  .room-name { font-size: 12.5px; font-weight: 500; flex: 1; }
+  .room-count { font-size: 9px; color: rgba(255,255,255,0.2); }
+  #user-bar {
+    border-top: 1px solid rgba(255,255,255,0.07); padding: 10px 12px;
+    display: flex; align-items: center; gap: 9px; cursor: pointer;
+    transition: background .12s;
+  }
+  #user-bar:hover { background: rgba(255,255,255,0.04); }
+  #user-bar-avatar { font-size: 24px; }
+  #user-bar-name { font-size: 12px; font-weight: 500; color: #fff; }
+  #user-bar-edit { font-size: 10px; color: rgba(255,255,255,0.25); }
+
+  /* ── MAIN ── */
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+  /* ── HEADER ── */
+  #chat-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 18px; border-bottom: 1px solid rgba(255,255,255,0.07);
+    background: #0f1117; flex-shrink: 0;
+  }
+  #header-emoji { font-size: 22px; }
+  #header-title { font-size: 14px; font-weight: 600; color: #fff; }
+  #header-desc { font-size: 10px; color: rgba(255,255,255,0.3); margin-top: 1px; }
+  #header-online { margin-left: auto; display: flex; align-items: center; gap: 5px; font-size: 10px; color: rgba(255,255,255,0.3); }
+  .online-dot { width: 6px; height: 6px; border-radius: 50%; background: #10b981; }
+
+  /* ── MESSAGES ── */
+  #messages {
+    flex: 1; overflow-y: auto; padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 3px;
+    scroll-behavior: smooth;
+  }
+  #messages::-webkit-scrollbar { width: 4px; }
+  #messages::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+  .msg { display: flex; align-items: flex-end; gap: 7px; }
+  .msg.own { flex-direction: row-reverse; }
+  .msg-av { width: 28px; height: 28px; font-size: 18px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .msg-av.hidden { visibility: hidden; }
+  .msg-body { max-width: 68%; display: flex; flex-direction: column; }
+  .own .msg-body { align-items: flex-end; }
+  .msg-pseudo { font-size: 10px; color: rgba(255,255,255,0.32); margin-bottom: 2px; margin-left: 3px; }
+  .msg-bubble {
+    padding: 8px 12px; border-radius: 18px; font-size: 13px; line-height: 1.45;
+    color: rgba(255,255,255,0.88); background: rgba(255,255,255,0.09);
+    border-bottom-left-radius: 4px; word-break: break-word; position: relative;
+  }
+  .own .msg-bubble { border-bottom-left-radius: 18px; border-bottom-right-radius: 4px; color: #fff; }
+  .msg-time { font-size: 9px; color: rgba(255,255,255,0.18); margin-top: 3px; margin-left: 3px; }
+  .own .msg-time { margin-right: 3px; }
+
+  /* Bouton signalement */
+  .report-btn {
+    position: absolute; right: -22px; top: 50%; transform: translateY(-50%);
+    background: none; border: none; cursor: pointer; color: rgba(255,255,255,0.15);
+    font-size: 12px; opacity: 0; transition: opacity .1s, color .1s;
+    padding: 4px;
+  }
+  .msg:hover .report-btn { opacity: 1; }
+  .report-btn:hover { color: #ef4444; }
+  .report-btn.done { color: #ef4444; opacity: 1; }
+
+  /* ── EMPTY STATE ── */
+  #empty { display: none; flex-direction: column; align-items: center; justify-content: center; flex: 1; color: rgba(255,255,255,0.2); }
+  #empty-emoji { font-size: 40px; margin-bottom: 10px; }
+  #empty p { font-size: 13px; }
+
+  /* ── INPUT ── */
+  #input-area { padding: 10px 14px 12px; border-top: 1px solid rgba(255,255,255,0.07); flex-shrink: 0; }
+  #input-wrap {
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 18px; padding: 9px 14px; transition: border-color .15s;
+  }
+  #input-wrap:focus-within { border-color: rgba(255,255,255,0.18); }
+  #input-av { font-size: 20px; flex-shrink: 0; }
+  #msg-input {
+    flex: 1; background: none; border: none; outline: none;
+    color: rgba(255,255,255,0.85); font-size: 13px; font-family: inherit;
+  }
+  #msg-input::placeholder { color: rgba(255,255,255,0.2); }
+  #send-btn { background: none; border: none; cursor: pointer; font-size: 18px; color: rgba(255,255,255,0.25); transition: color .12s; flex-shrink: 0; }
+  #send-btn:hover { color: rgba(255,255,255,0.8); }
+  #input-hint { font-size: 9px; color: rgba(255,255,255,0.12); text-align: center; margin-top: 4px; }
+
+  /* ── SETUP OVERLAY ── */
+  #setup-overlay {
+    position: fixed; inset: 0; z-index: 100;
+    background: rgba(0,0,0,0.75); backdrop-filter: blur(6px);
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+  }
+  #setup-modal {
+    background: #1c1e26; border-radius: 18px; width: 100%; max-width: 340px;
+    padding: 26px 24px; border: 1px solid rgba(255,255,255,0.1);
+  }
+  .setup-center { text-align: center; margin-bottom: 20px; }
+  .setup-big { font-size: 44px; }
+  .setup-title { font-size: 17px; font-weight: 600; color: #fff; margin-top: 8px; }
+  .setup-sub { font-size: 11px; color: rgba(255,255,255,0.35); margin-top: 3px; }
+  .setup-label { font-size: 9px; text-transform: uppercase; letter-spacing: .1em; color: rgba(255,255,255,0.28); margin-bottom: 8px; }
+  #avatar-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-bottom: 16px; }
+  .av-btn {
+    background: rgba(255,255,255,0.05); border: 1.5px solid transparent;
+    border-radius: 9px; padding: 5px 2px; font-size: 22px; cursor: pointer;
+    transition: all .12s; line-height: 1;
+  }
+  .av-btn:hover { background: rgba(255,255,255,0.1); }
+  .av-btn.sel { background: rgba(99,102,241,0.2); border-color: #6366f1; transform: scale(1.08); }
+  #pseudo-input {
+    width: 100%; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 11px; padding: 11px 14px; color: #fff; font-size: 13px;
+    font-family: inherit; outline: none; margin-bottom: 14px; transition: border-color .15s;
+  }
+  #pseudo-input:focus { border-color: rgba(99,102,241,0.5); }
+  #pseudo-input::placeholder { color: rgba(255,255,255,0.2); }
+  #join-btn {
+    width: 100%; background: #6366f1; border: none; border-radius: 11px;
+    padding: 12px; color: #fff; font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: background .12s, transform .08s; font-family: inherit;
+  }
+  #join-btn:hover:not(:disabled) { background: #5254cc; }
+  #join-btn:active { transform: scale(.98); }
+  #join-btn:disabled { opacity: .3; cursor: default; }
+  #join-err { font-size: 11px; color: #f87171; text-align: center; min-height: 16px; margin-bottom: 6px; }
+
+  /* ── SPLASH (aucun salon sélectionné) ── */
+  #splash {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    color: rgba(255,255,255,0.18); text-align: center;
+  }
+  #splash-emoji { font-size: 48px; margin-bottom: 12px; }
+  #splash h2 { font-size: 16px; font-weight: 500; color: rgba(255,255,255,0.5); }
+  #splash p { font-size: 12px; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- SIDEBAR -->
+  <div id="sidebar">
+    <div id="sidebar-header">
+      <h1>💬 ChatLibre</h1>
+      <p>Discussion anonyme & libre</p>
+    </div>
+    <div id="rooms-label">Salons</div>
+    <div id="rooms-list"></div>
+    <div id="user-bar" onclick="openSetup()">
+      <div id="user-bar-avatar">🙂</div>
+      <div>
+        <div id="user-bar-name">—</div>
+        <div id="user-bar-edit">Modifier le profil</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div id="main">
+
+    <!-- Splash (aucun salon) -->
+    <div id="splash">
+      <div id="splash-emoji">💬</div>
+      <h2>Choisis un salon</h2>
+      <p>Sélectionne un salon dans la liste pour commencer</p>
+    </div>
+
+    <!-- Chat (caché jusqu'à sélection) -->
+    <div id="chat-view" style="display:none; flex:1; flex-direction:column; min-height:0;">
+      <div id="chat-header">
+        <div id="header-emoji">💬</div>
+        <div>
+          <div id="header-title">Salon</div>
+          <div id="header-desc">…</div>
+        </div>
+        <div id="header-online">
+          <div class="online-dot"></div>
+          <span id="online-count">0 en ligne</span>
+        </div>
+      </div>
+      <div id="messages"></div>
+      <div id="input-area">
+        <div id="input-wrap">
+          <div id="input-av">🙂</div>
+          <input id="msg-input" placeholder="Écrire ici…" maxlength="500" autocomplete="off" />
+          <button id="send-btn">↑</button>
+        </div>
+        <div id="input-hint">Entrée pour envoyer</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- SETUP OVERLAY -->
+<div id="setup-overlay">
+  <div id="setup-modal">
+    <div class="setup-center">
+      <div class="setup-big">💬</div>
+      <div class="setup-title">Rejoindre le chat</div>
+      <div class="setup-sub">Aucune inscription requise</div>
+    </div>
+
+    <div class="setup-label">Choisis ton avatar</div>
+    <div id="avatar-grid"></div>
+
+    <div class="setup-label">Ton pseudo</div>
+    <input id="pseudo-input" placeholder="Ex : Shadow42, Lune, Nomad…" maxlength="20" />
+
+    <div id="join-err"></div>
+    <button id="join-btn" disabled>Entrer…</button>
+  </div>
+</div>
+
+<script>
+// ── CONFIG ────────────────────────────────────────────────────────
+const AVATARS = ['🦊','🐺','🐱','🦁','🐸','🐧','🦋','🐙','🦜','🦅','🐻','🎭']
+const ROOMS_COLORS = {
+  general:'#6366f1', gaming:'#10b981', famille:'#f59e0b',
+  ecole:'#3b82f6', apprentissage:'#8b5cf6', personnel:'#ec4899', expats:'#06b6d4'
+}
+
+// ── STATE ─────────────────────────────────────────────────────────
+let socket = null
+let fingerprint = null
+let user = JSON.parse(localStorage.getItem('chatuser') || 'null')
+let activeRoom = null
+let selectedAvatar = AVATARS[Math.floor(Math.random() * AVATARS.length)]
+let reportedSet = new Set()
+
+// ── FINGERPRINT ───────────────────────────────────────────────────
+FingerprintJS.load().then(fp => fp.get()).then(r => {
+  fingerprint = r.visitorId
+  initSocket()
+})
+
+// ── SOCKET ────────────────────────────────────────────────────────
+function initSocket() {
+  socket = io({ auth: { fingerprint } })
+
+  socket.on('connect_error', err => {
+    if (err.message === 'banned') {
+      localStorage.removeItem('chatuser')
+      alert('Tu as été banni de la plateforme.')
+      location.reload()
+    }
+  })
+
+  socket.on('history', msgs => {
+    const container = document.getElementById('messages')
+    container.innerHTML = ''
+    msgs.forEach(renderMessage)
+    container.scrollTop = container.scrollHeight
+  })
+
+  socket.on('message', msg => {
+    renderMessage(msg)
+    const c = document.getElementById('messages')
+    c.scrollTop = c.scrollHeight
+  })
+
+  socket.on('presence', count => {
+    document.getElementById('online-count').textContent = count + ' en ligne'
+    const roomBtn = document.querySelector(`.room-btn[data-slug="${activeRoom}"]`)
+    if (roomBtn) roomBtn.querySelector('.room-count').textContent = count
+  })
+
+  socket.on('banned', () => {
+    localStorage.removeItem('chatuser')
+    alert('Tu as été banni.')
+    location.reload()
+  })
+
+  socket.on('reported', () => {
+    // Confirmation silencieuse
+  })
+
+  // Charger les salons
+  loadRooms()
+
+  // Si user déjà enregistré, skip le setup
+  if (user) {
+    closeSetup()
+    updateUserBar()
+  }
+}
+
+// ── ROOMS ─────────────────────────────────────────────────────────
+function loadRooms() {
+  fetch('/api/rooms').then(r => r.json()).then(rooms => {
+    const list = document.getElementById('rooms-list')
+    list.innerHTML = ''
+    rooms.forEach(room => {
+      const btn = document.createElement('button')
+      btn.className = 'room-btn'
+      btn.dataset.slug = room.slug
+      btn.dataset.color = room.color
+      btn.innerHTML = `
+        <div class="room-dot" style="background:${room.color}"></div>
+        <div class="room-emoji">${room.emoji}</div>
+        <div class="room-name">${room.name}</div>
+        <div class="room-count">${room.online || ''}</div>
+      `
+      btn.addEventListener('click', () => joinRoom(room))
+      list.appendChild(btn)
+    })
+  })
+}
+
+function joinRoom(room) {
+  if (!user) { openSetup(); return }
+
+  document.querySelectorAll('.room-btn').forEach(b => b.classList.remove('active'))
+  document.querySelector(`.room-btn[data-slug="${room.slug}"]`)?.classList.add('active')
+
+  activeRoom = room.slug
+  document.getElementById('header-emoji').textContent = room.emoji
+  document.getElementById('header-title').textContent = room.name
+  document.getElementById('header-desc').textContent = room.desc
+  document.getElementById('msg-input').placeholder = `Écrire dans ${room.name}…`
+
+  document.getElementById('splash').style.display = 'none'
+  document.getElementById('chat-view').style.display = 'flex'
+  document.getElementById('messages').innerHTML = ''
+
+  socket.emit('join', { slug: room.slug, pseudo: user.pseudo, avatar: user.avatar })
+}
+
+// ── MESSAGES ──────────────────────────────────────────────────────
+function renderMessage(msg) {
+  const isOwn = msg.pseudo === user?.pseudo
+  const container = document.getElementById('messages')
+  const msgs = container.querySelectorAll('.msg')
+  const last = msgs[msgs.length - 1]
+  const lastPseudo = last?.dataset.pseudo
+  const showAvatar = !isOwn && lastPseudo !== msg.pseudo
+
+  const div = document.createElement('div')
+  div.className = 'msg' + (isOwn ? ' own' : '')
+  div.dataset.pseudo = msg.pseudo
+
+  const color = ROOMS_COLORS[activeRoom] || '#6366f1'
+  const bubbleStyle = isOwn ? `style="background:${color}"` : ''
+
+  div.innerHTML = `
+    ${!isOwn ? `<div class="msg-av ${showAvatar ? '' : 'hidden'}">${msg.avatar || '🙂'}</div>` : ''}
+    <div class="msg-body">
+      ${showAvatar && !isOwn ? `<div class="msg-pseudo">${msg.pseudo}</div>` : ''}
+      <div class="msg-bubble" ${bubbleStyle}>
+        ${escapeHtml(msg.content)}
+        ${!isOwn ? `<button class="report-btn ${reportedSet.has(msg.id) ? 'done' : ''}" data-id="${msg.id}" title="Signaler">⚑</button>` : ''}
+      </div>
+      <div class="msg-time">${msg.time}</div>
+    </div>
+  `
+
+  if (!isOwn) {
+    div.querySelector('.report-btn')?.addEventListener('click', () => {
+      if (reportedSet.has(msg.id)) return
+      reportedSet.add(msg.id)
+      div.querySelector('.report-btn').classList.add('done')
+      socket.emit('report', { messageId: msg.id })
+    })
+  }
+
+  container.appendChild(div)
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+}
+
+// ── SEND ──────────────────────────────────────────────────────────
+function sendMessage() {
+  const input = document.getElementById('msg-input')
+  const content = input.value.trim()
+  if (!content || !activeRoom) return
+  socket.emit('message', { content })
+  input.value = ''
+}
+
+document.getElementById('send-btn').addEventListener('click', sendMessage)
+document.getElementById('msg-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() }
+})
+
+// ── SETUP ─────────────────────────────────────────────────────────
+const avatarGrid = document.getElementById('avatar-grid')
+AVATARS.forEach(av => {
+  const btn = document.createElement('button')
+  btn.className = 'av-btn' + (av === selectedAvatar ? ' sel' : '')
+  btn.textContent = av
+  btn.addEventListener('click', () => {
+    selectedAvatar = av
+    document.querySelectorAll('.av-btn').forEach(b => b.classList.remove('sel'))
+    btn.classList.add('sel')
+    updateJoinBtn()
+  })
+  avatarGrid.appendChild(btn)
+})
+
+const pseudoInput = document.getElementById('pseudo-input')
+const joinBtn = document.getElementById('join-btn')
+
+function updateJoinBtn() {
+  const p = pseudoInput.value.trim()
+  joinBtn.disabled = p.length < 2
+  joinBtn.textContent = p.length >= 2 ? `Entrer comme ${p} ${selectedAvatar}` : 'Entrer…'
+}
+
+pseudoInput.addEventListener('input', updateJoinBtn)
+pseudoInput.addEventListener('keydown', e => { if (e.key === 'Enter') joinBtn.click() })
+
+joinBtn.addEventListener('click', () => {
+  const p = pseudoInput.value.trim()
+  if (p.length < 2) return
+  user = { pseudo: p, avatar: selectedAvatar }
+  localStorage.setItem('chatuser', JSON.stringify(user))
+  closeSetup()
+  updateUserBar()
+})
+
+function openSetup() {
+  pseudoInput.value = user?.pseudo || ''
+  updateJoinBtn()
+  document.getElementById('setup-overlay').style.display = 'flex'
+}
+function closeSetup() { document.getElementById('setup-overlay').style.display = 'none' }
+function updateUserBar() {
+  document.getElementById('user-bar-avatar').textContent = user?.avatar || '🙂'
+  document.getElementById('user-bar-name').textContent = user?.pseudo || '—'
+  document.getElementById('input-av').textContent = user?.avatar || '🙂'
+}
+</script>
+</body>
+</html>
